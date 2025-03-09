@@ -1,0 +1,27 @@
+---------------------------
+Fetching User Data via API
+---------------------------
+ Vulnerable Code 
+
+public Response getUser(@QueryParam("id") String id) {
+    String query = "SELECT * FROM users WHERE id=" + id;
+    Statement stmt = connection.createStatement();
+    ResultSet rs = stmt.executeQuery(query);
+    return Response.ok(rs).build();
+}
+
+🔴 Why is this dangerous?
+
+If id = 1 OR 1=1, the API will return all users’ data instead of just one.
+
+✅ Secure Code (Fixed)
+
+public Response getUser(@QueryParam("id") String id) {
+    String query = "SELECT * FROM users WHERE id=?";
+    PreparedStatement pstmt = connection.prepareStatement(query);
+    pstmt.setString(1, id);
+    ResultSet rs = pstmt.executeQuery();
+    return Response.ok(rs).build();
+}
+
+Fix: Uses PreparedStatement to protect against malicious input.
