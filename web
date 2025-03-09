@@ -1,0 +1,24 @@
+Login Authentication
+
+String user = request.getParameter("user");
+String pass = request.getParameter("pass");
+
+String query = "SELECT * FROM users WHERE username='" + user + "' AND password='" + pass + "'";
+Statement stmt = connection.createStatement();
+ResultSet rs = stmt.executeQuery(query);
+
+🔴 Why is this dangerous?
+
+If an attacker enters ' OR '1'='1, they can log in without a password.
+Hackers can steal user data or escalate privileges.
+
+✅ Secure Code (Fixed)
+
+String query = "SELECT * FROM users WHERE username=? AND password=?";
+PreparedStatement pstmt = connection.prepareStatement(query);
+pstmt.setString(1, user);
+pstmt.setString(2, pass);
+ResultSet rs = pstmt.executeQuery();
+
+Fix: Uses PreparedStatement to prevent SQL Injection.
+
