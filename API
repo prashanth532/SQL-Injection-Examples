@@ -1,27 +1,214 @@
----------------------------
-Fetching User Data via API
----------------------------
- Vulnerable Code 
-
-public Response getUser(@QueryParam("id") String id) {
-    String query = "SELECT * FROM users WHERE id=" + id;
-    Statement stmt = connection.createStatement();
-    ResultSet rs = stmt.executeQuery(query);
-    return Response.ok(rs).build();
+-----------------------------------------------------------
+Authentication Bypass via SQL Injection
+-----------------------------------------------------------
+Vulnerable Code
+-----------------------------------------------------------
+app.post('/login', async (req, res) => {
+    let { username, password } = req.body;
+    let query = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;
+    let result = await db.query(query);
+    if (result.length > 0) {
+        res.json({ message: "Login successful!" });
+    } else {
+        res.status(401).json({ error: "Invalid credentials" });
+    }
+});
+-----------------------------------------------------------
+Why is it wrong?
+-----------------------------------------------------------
+•	An attacker can bypass authentication using:
+•	username=admin'--  
+•	password=anything
+o	This changes the query to:
+o	SELECT * FROM users WHERE username = 'admin'--' AND password = 'anything'
+o	The -- makes the rest a comment, logging in as admin without a password.
+-----------------------------------------------------------
+Fixed Code (Using Parameterized Queries)
+-----------------------------------------------------------
+app.post('/login', async (req, res) => {
+    let { username, password } = req.body;
+    let query = `SELECT * FROM users WHERE username = ? AND password = ?`;
+    let result = await db.query(query, [username, password]);
+    
+    if (result.length > 0) {
+        res.json({ message: "Login successful!" });
+    } else {
+        res.status(401).json({ error: "Invalid credentials" });
+    }
+});
+-----------------------------------------------------------
+Fix Explanation
+-----------------------------------------------------------
+•	Uses prepared statements (? placeholders) to prevent SQL injection.
+•	User input is not directly inserted into the query string.
+-----------------------------------------------------------
+Data Extraction via SQL Injection
+-----------------------------------------------------------
+Vulnerable Code
+-----------------------------------------------------------
+@app.route('/user/<user_id>', methods=['GET'])
+def get_user(user_id):
+    query = f"SELECT * FROM users WHERE id = {user_id}"
+    result = db.execute(query).fetchall()
+    return jsonify(result)
+-----------------------------------------------------------
+Why is it wrong?
+-----------------------------------------------------------
+•	An attacker can send:
+•	GET /user/1 UNION SELECT name, password FROM users
+o	This allows extraction of all usernames and passwords.
+Fixed Code (Using Parameterized Queries)
+@app.route('/user/<int:user_id>', methods=['GET'])
+def get_user(user_id):
+    query = "SELECT * FROM users WHERE id = ?"
+    result = db.execute(query, (user_id,)).fetchall()
+    return jsonify(result)
+-----------------------------------------------------------
+Fix Explanation
+-----------------------------------------------------------
+•	Uses parameterized queries (? placeholder).
+•	Casts user_id to int to prevent injection.
+-----------------------------------------------------------
+Blind SQL Injection in Search API
+-----------------------------------------------------------
+Vulnerable Code
+-----------------------------------------------------------
+if (isset($_GET['search'])) {
+    $search = $_GET['search'];
+    $query = "SELECT * FROM products WHERE name LIKE '%$search%'";
+    $result = mysqli_query($conn, $query);
+    
+    while ($row = mysqli_fetch_assoc($result)) {
+        echo $row['name'] . "<br>";
+    }
 }
-
-🔴 Why is this dangerous?
-
-If id = 1 OR 1=1, the API will return all users’ data instead of just one.
-
-✅ Secure Code (Fixed)
-
-public Response getUser(@QueryParam("id") String id) {
-    String query = "SELECT * FROM users WHERE id=?";
-    PreparedStatement pstmt = connection.prepareStatement(query);
-    pstmt.setString(1, id);
-    ResultSet rs = pstmt.executeQuery();
-    return Response.ok(rs).build();
+-----------------------------------------------------------
+ Why is it wrong?
+-----------------------------------------------------------
+•	An attacker can test if a vulnerability exists by sending:
+•	search=' OR '1'='1
+o	This may return all products.
+-----------------------------------------------------------
+Fixed Code (Using Prepared Statements)
+-----------------------------------------------------------
+if (isset($_GET['search'])) {
+    $search = "%" . $_GET['search'] . "%";
+    $stmt = $conn->prepare("SELECT * FROM products WHERE name LIKE ?");
+    $stmt->bind_param("s", $search);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    while ($row = $result->fetch_assoc()) {
+        echo htmlspecialchars($row['name']) . "<br>";
+    }
 }
+-----------------------------------------------------------
+ Fix Explanation
+-----------------------------------------------------------
+•	Uses prepare() and bind_param() to safely handle user input.
+•	Escapes output using htmlspecialchars().
+-----------------------------------------------------------
+SQL Injection in API Header Token
+-----------------------------------------------------------
+Vulnerable Code
+-----------------------------------------------------------
+@RequestMapping(value = "/profile", method = RequestMethod.GET)
+public ResponseEntity<String> getProfile(@RequestHeader("Authorization") String token) {
+    String sql = "SELECT * FROM users WHERE token = '" + token + "'";
+    ResultSet rs = statement.executeQuery(sql);
+    
+    if (rs.next()) {
+        return ResponseEntity.ok("User Profile Data");
+    } else {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid Token");
+    }
+}
+-----------------------------------------------------------
+Why is it wrong?
+-----------------------------------------------------------
+•	Attacker can manipulate the token header:
+•	Authorization: ' OR '1'='1
+o	This may return data for all users.
+-----------------------------------------------------------
+Fixed Code (Using Prepared Statements)
+-----------------------------------------------------------
+@RequestMapping(value = "/profile", method = RequestMethod.GET)
+public ResponseEntity<String> getProfile(@RequestHeader("Authorization") String token) {
+    String sql = "SELECT * FROM users WHERE token = ?";
+    PreparedStatement stmt = connection.prepareStatement(sql);
+    stmt.setString(1, token);
+    ResultSet rs = stmt.executeQuery();
 
-Fix: Uses PreparedStatement to protect against malicious input.
+    if (rs.next()) {
+        return ResponseEntity.ok("User Profile Data");
+    } else {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid Token");
+    }
+}
+-----------------------------------------------------------
+Fix Explanation
+-----------------------------------------------------------
+•	Uses PreparedStatement to prevent SQL injection.
+•	Parameterized queries handle input safely.
+-----------------------------------------------------------
+SQL Injection in JSON Payload (Update API)
+-----------------------------------------------------------
+Vulnerable Code
+-----------------------------------------------------------
+func updateUser(w http.ResponseWriter, r *http.Request) {
+    var data map[string]string
+    json.NewDecoder(r.Body).Decode(&data)
+
+    query := fmt.Sprintf("UPDATE users SET email = '%s' WHERE id = %s", data["email"], data["id"])
+    _, err := db.Exec(query)
+    
+    if err != nil {
+        http.Error(w, "Update failed", http.StatusBadRequest)
+        return
+    }
+
+    fmt.Fprintln(w, "Update successful")
+}
+-----------------------------------------------------------
+Why is it wrong?
+-----------------------------------------------------------
+•	An attacker can send:
+•	{
+•	    "id": "1 OR 1=1",
+•	    "email": "attacker@example.com"
+•	}
+o	This may update all users' emails.
+-----------------------------------------------------------
+Fixed Code (Using Parameterized Queries)
+-----------------------------------------------------------
+func updateUser(w http.ResponseWriter, r *http.Request) {
+    var data struct {
+        ID    string `json:"id"`
+        Email string `json:"email"`
+    }
+    json.NewDecoder(r.Body).Decode(&data)
+
+    query := "UPDATE users SET email = $1 WHERE id = $2"
+    _, err := db.Exec(query, data.Email, data.ID)
+
+    if err != nil {
+        http.Error(w, "Update failed", http.StatusBadRequest)
+        return
+    }
+
+    fmt.Fprintln(w, "Update successful")
+}
+-----------------------------------------------------------
+Fix Explanation
+-----------------------------------------------------------
+•	Uses $1, $2 placeholders to prevent SQL injection.
+•	Exec(query, args...) safely passes parameters.
+-----------------------------------------------------------
+Mitigations
+-----------------------------------------------------------
+1.	Always use parameterized queries or prepared statements.
+2.	Never concatenate user input into SQL queries.
+3.	Sanitize and validate input at both client and server sides.
+4.	Use ORM frameworks like SQLAlchemy, Hibernate, and Django ORM for safer queries.
+5.	Limit database permissions to prevent mass data exposure.
+
